@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+
+# PyInstaller
+build/
+*.spec
+
+# User requested to NOT ignore .exe (so we don't list dist/ or *.exe)
+# dist/

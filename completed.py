@@ -1,177 +1,242 @@
 import pandas as rd
 import pickle
 from sklearn.metrics import accuracy_score
-import tkinter as tk
-from tkinter import ttk
-df = rd.read_csv("E:\diabetes2.csv")
-print(df)
-print(df.head(10))
+import customtkinter as ctk
+from PIL import Image
+import threading
+from tkinter import messagebox
 
-X = df.drop('Outcome', axis = 1)
-y = df[['Outcome']]
-from sklearn.model_selection import train_test_split
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33, random_state=42)
-print(X_train.shape)
-print(X_test.shape)
+# Configuration for CustomTkinter
+ctk.set_appearance_mode("System")  # Modes: "System" (standard), "Dark", "Light"
+ctk.set_default_color_theme("blue")  # Themes: "blue" (standard), "green", "dark-blue"
 
-from sklearn.linear_model import LogisticRegression
-lr = LogisticRegression()
+class DiabetesApp(ctk.CTk):
+    def __init__(self):
+        super().__init__()
 
-model = lr.fit(X_train,y_train)
-y_pred = lr.predict(X_test)
+        # Window Setup
+        self.title("Diabetes Prediction System")
+        self.geometry("900x700")
+        
+        # Grid Configuration
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
 
-print(y_pred)
-print("Accuracy is :")
-print(accuracy_score(y_pred,y_test))
+        # Sidebar (Left)
+        self.sidebar_frame = ctk.CTkFrame(self, width=200, corner_radius=0)
+        self.sidebar_frame.grid(row=0, column=0, rowspan=4, sticky="nsew")
+        self.sidebar_frame.grid_rowconfigure(4, weight=1)
 
+        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="MediPredict", font=ctk.CTkFont(size=20, weight="bold"))
+        self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
+        
+        self.sidebar_button_1 = ctk.CTkButton(self.sidebar_frame, text="Prediction", command=self.sidebar_button_event)
+        self.sidebar_button_1.grid(row=1, column=0, padx=20, pady=10)
+        
+        self.appearance_mode_label = ctk.CTkLabel(self.sidebar_frame, text="Appearance Mode:", anchor="w")
+        self.appearance_mode_label.grid(row=5, column=0, padx=20, pady=(10, 0))
+        self.appearance_mode_optionemenu = ctk.CTkOptionMenu(self.sidebar_frame, values=["System", "Light", "Dark"],
+                                                               command=self.change_appearance_mode_event)
+        self.appearance_mode_optionemenu.grid(row=6, column=0, padx=20, pady=(10, 20))
 
-Model = pickle.dumps(model)
+        # Main Content Area (Right)
+        self.main_scrollable_frame = ctk.CTkScrollableFrame(self, label_text="Patient Data Input")
+        self.main_scrollable_frame.grid(row=0, column=1, rowspan=4, sticky="nsew", padx=20, pady=20)
+        self.main_scrollable_frame.grid_columnconfigure(0, weight=1)
+        self.main_scrollable_frame.grid_columnconfigure(1, weight=1)
 
-win = tk.Tk()
-win.geometry("750x500")
-win.title('Diabetes Testing')
-win.configure(bg='light pink')
+        # Model Loading
+        self.model = None
+        self.load_and_train_model()
 
-Preg = ttk.Label(win, text="Preg", width=20, font=("algerian", 15), background='light pink')
-Preg.grid(row=0, column=0, sticky=tk.W, padx=10, pady=10)
-Preg_var = tk.StringVar()
-Preg_entrybox = ttk.Entry(win, width=30, textvariable=Preg_var)
-Preg_entrybox.grid(row=0, column=1, padx=10, pady=10)
-Preg_entrybox.configure(background='white')
+        # Input Fields with typical ranges (Pima Indians Diabetes Dataset constraints)
+        self.fields = [
+            ("Pregnancies", "Preg", "0 - 20"),
+            ("Glucose", "Gluco", "50 - 200 mg/dL"),
+            ("Blood Pressure", "BP", "40 - 140 mm Hg"),
+            ("Skin Thickness", "skinTH", "5 - 100 mm"),
+            ("Insulin", "Insulin", "0 - 900 mu U/ml"),
+            ("BMI", "BMI", "10 - 60"),
+            ("Diabetes Pedigree", "Pedigreefunc", "0.0 - 2.5"),
+            ("Age", "Age", "21 - 100")
+        ]
+        self.entries = {}
 
-Gluco = ttk.Label(win, text="Glucose", width=20, font=("algerian", 15), background='light pink')
-Gluco.grid(row=1, column=0, sticky=tk.W, padx=10, pady=10)
-Gluco_var = tk.StringVar()
-Gluco_entrybox = ttk.Entry(win, width=30, textvariable=Gluco_var)
-Gluco_entrybox.grid(row=1, column=1, padx=10, pady=10)
-Gluco_entrybox.configure(background='white')
+        for i, (label_text, key, range_hint) in enumerate(self.fields):
+            # Label with range hint
+            full_label = f"{label_text} ({range_hint})"
+            label = ctk.CTkLabel(self.main_scrollable_frame, text=full_label, anchor="w", text_color=("gray60", "gray40"))
+            label.grid(row=i, column=0, padx=20, pady=(10, 0), sticky="w")
+            
+            entry = ctk.CTkEntry(self.main_scrollable_frame, placeholder_text=f"e.g., {range_hint.split()[0]}")
+            entry.grid(row=i, column=1, padx=20, pady=(10, 0), sticky="ew")
+            self.entries[key] = entry
 
-BP = ttk.Label(win, text="BP", width=20, font=("algerian", 15), background='light pink')
-BP.grid(row=2, column=0, sticky=tk.W, padx=10, pady=10)
-BP_var = tk.StringVar()
-BP_entrybox = ttk.Entry(win, width=30, textvariable=BP_var)
-BP_entrybox.grid(row=2, column=1, padx=10, pady=10)
-BP_entrybox.configure(background='white')
+        # Buttons
+        self.predict_button = ctk.CTkButton(self.main_scrollable_frame, text="Generate Prediction", command=self.predict_event, height=40)
+        self.predict_button.grid(row=len(self.fields), column=0, padx=(20, 10), pady=30, sticky="ew")
 
-skinTH = ttk.Label(win, text="Skin Thickness", width=20, font=("algerian", 15), background='light pink')
-skinTH.grid(row=3, column=0, sticky=tk.W, padx=10, pady=10)
-skinTH_var = tk.StringVar()
-skinTH_entrybox = ttk.Entry(win, width=30, textvariable=skinTH_var)
-skinTH_entrybox.grid(row=3, column=1, padx=10, pady=10)
-skinTH_entrybox.configure(background='white')
+        self.reset_button = ctk.CTkButton(self.main_scrollable_frame, text="Reset Fields", command=self.reset_event, height=40, fg_color="gray", hover_color="#555555")
+        self.reset_button.grid(row=len(self.fields), column=1, padx=(10, 20), pady=30, sticky="ew")
 
-Insulin = ttk.Label(win, text="Insulin", width=20, font=("algerian", 15), background='light pink')
-Insulin.grid(row=4, column=0, sticky=tk.W, padx=10, pady=10)
-Insulin_var = tk.StringVar()
-Insulin_entrybox = ttk.Entry(win, width=30, textvariable=Insulin_var)
-Insulin_entrybox.grid(row=4, column=1, padx=10, pady=10)
-Insulin_entrybox.configure(background='white')
+        # Result Area
+        self.result_frame = ctk.CTkFrame(self.main_scrollable_frame, fg_color="transparent")
+        self.result_frame.grid(row=len(self.fields)+1, column=0, columnspan=2, sticky="ew")
+        
+        self.result_label = ctk.CTkLabel(self.result_frame, text="", font=ctk.CTkFont(size=18, weight="bold"))
+        self.result_label.pack(pady=10)
 
-BMI = ttk.Label(win, text="BMI", width=20, font=("algerian", 15), background='light pink')
-BMI.grid(row=5, column=0, sticky=tk.W, padx=10, pady=10)
-BMI_var = tk.StringVar()
-BMI_entrybox = ttk.Entry(win, width=30, textvariable=BMI_var)
-BMI_entrybox.grid(row=5, column=1, padx=10, pady=10)
-BMI_entrybox.configure(background='white')
+        self.advice_button = ctk.CTkButton(self.result_frame, text="View Recommendations", command=self.show_advice, state="disabled")
+        self.advice_button.pack(pady=10)
+        
+        self.prediction_result = None # Store result for advice
 
-Pedigreefunc = ttk.Label(win, text="Pedigreefunc", width=20, font=("algerian", 15), background='light pink')
-Pedigreefunc.grid(row=6, column=0, sticky=tk.W, padx=10, pady=10)
-Pedigreefunc_var = tk.StringVar()
-Pedigreefunc_entrybox=ttk.Entry(win,width=30,textvariable=Pedigreefunc_var)
-Pedigreefunc_entrybox.grid(row=6,column=1)
-Pedigreefunc_entrybox.configure(background='white')
-                                  
+    def load_and_train_model(self):
+        try:
+            df = rd.read_csv("diabetes2.csv")
+            X = df.drop('Outcome', axis=1)
+            y = df[['Outcome']]
+            
+            # Save feature names
+            self.feature_names = X.columns.tolist()
+            print(f"Model trained on features: {self.feature_names}")
+            
+            from sklearn.model_selection import train_test_split
+            from sklearn.linear_model import LogisticRegression
+            
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33, random_state=42)
+            lr = LogisticRegression(max_iter=1000)
+            self.model = lr.fit(X_train, y_train.values.ravel())
+            
+            y_pred = lr.predict(X_test)
+            acc = accuracy_score(y_pred, y_test)
+            print(f"Model trained. Accuracy: {acc}")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load/train model: {e}")
 
+    def change_appearance_mode_event(self, new_appearance_mode: str):
+        ctk.set_appearance_mode(new_appearance_mode)
 
-Age=ttk.Label(win,text="Age",width=35,font=("algerian", 15), background='light pink')
-Age.grid(row=7,column=0,sticky=tk.W, padx=10,pady=10)
-Age_var=tk.StringVar()
-Age_entrybox=ttk.Entry(win,width=30,textvariable=Age_var)
-Age_entrybox.grid(row=7,column=1)
+    def sidebar_button_event(self):
+        print("Sidebar button click")
+
+    def reset_event(self):
+        for _, key, _ in self.fields:
+            self.entries[key].delete(0, 'end')
+        self.result_label.configure(text="")
+        self.advice_button.configure(state="disabled", text="View Recommendations", fg_color=["#3B8ED0", "#1F6AA5"])
+        self.prediction_result = None
+
+    def predict_event(self):
+        if not self.model:
+            messagebox.showerror("Error", "Model not loaded.")
+            return
+
+        import pandas as pd
+        data = {}
+        try:
+            # Collect data using internal keys
+            temp_data = {}
+            for _, key, _ in self.fields:
+                val = self.entries[key].get()
+                if not val.strip():
+                     messagebox.showwarning("Missing Input", f"Please enter a value for {key}")
+                     return
+                temp_data[key] = float(val)
+            
+            # Map temp_data (keys) to model feature_names (CSV columns)
+            # Assumption: The order of self.fields matches the order of self.feature_names?
+            # self.fields order: Pregnancies, Glucose, BP, Skin, Insulin, BMI, Pedigree, Age
+            # diabetes2.csv standard order: Pregnancies, Glucose, BloodPressure, SkinThickness, Insulin, BMI, DiabetesPedigreeFunction, Age
+            
+            # Let's rely on index since we can't be 100% sure of CSV header names vs our keys without mapping logic
+            # Be safer: Check length match and construct list
+            
+            if len(self.feature_names) != len(self.fields):
+                raise ValueError("Feature count mismatch between model and UI.")
+
+            # Create dataframe with correct column names from model
+            final_data = {}
+            for i, feature_name in enumerate(self.feature_names):
+                # We assume the UI fields are defined in the same order as CSV columns. 
+                # This is standard for this dataset.
+                ui_key = self.fields[i][1] # Get key from fields list at index i
+                final_data[feature_name] = [temp_data[ui_key]]
+            
+            # DataFrame for prediction
+            input_df = pd.DataFrame(final_data)
+            
+            output = self.model.predict(input_df)[0]
+            self.prediction_result = output
+            
+            if output == 1:
+                self.result_label.configure(text="Result: High Risk of Diabetes", text_color="#e74c3c") # Red
+                self.advice_button.configure(text="View Diet Plan", state="normal", fg_color="#e74c3c", hover_color="#c0392b")
+            else:
+                self.result_label.configure(text="Result: Low Risk of Diabetes", text_color="#2ecc71") # Green
+                self.advice_button.configure(text="View Health Tips", state="normal", fg_color="#2ecc71", hover_color="#27ae60")
+                
+        except ValueError as ve:
+            print(f"Validation Error: {ve}")
+            messagebox.showerror("Invalid Input", f"Please ensure all fields contain valid numbers.\nDetails: {ve}")
+        except Exception as e:
+            print(f"Prediction Error: {e}")
+            messagebox.showerror("Error", f"An error occurred during prediction:\n{e}")
+
+    def show_advice(self):
+        if self.prediction_result is None:
+            return
+            
+        # Check if window already exists and is open
+        if hasattr(self, 'advice_window') and self.advice_window is not None and self.advice_window.winfo_exists():
+            self.advice_window.lift()
+            self.advice_window.focus()
+            return
+
+        self.advice_window = ctk.CTkToplevel(self)
+        self.advice_window.geometry("500x400")
+        self.advice_window.title("Recommendations")
+        
+        # Bring to front
+        self.advice_window.lift()
+        self.advice_window.attributes('-topmost', True)
+        self.advice_window.after(100, lambda: self.advice_window.attributes('-topmost', False)) # Use after instead of after_idle for better stability
+        
+        textbox = ctk.CTkTextbox(self.advice_window, width=460, height=360)
+        textbox.pack(padx=20, pady=20)
+        
+        if self.prediction_result == 1:
+            title = "DIET PLAN FOR DIABETIC MANAGEMENT\n\n"
+            content = """Nutrient Distribution:
+• Carbohydrates (50%): Whole grains, vegetables, fruits, legumes. Avoid refined sugar.
+• Proteins (25%): Lean meat, poultry, fish, eggs, tofu, beans.
+• Fats (25%): Avocados, nuts, seeds, olive oil.
+
+Recommended Foods:
+• Leafy greens (Spinach, Kale)
+• Fatty fish (Salmon, Mackerel)
+• Berries and citrus fruits
+• Whole grains (Quinoa, Brown Rice)
+            """
+        else:
+            title = "HEALTH TIPS FOR PREVENTION\n\n"
+            content = """Prevention Strategies:
+1. Physical Activity
+   - Aim for at least 150 minutes of moderate aerobic activity per week.
    
+2. Healthy Eating
+   - Focus on fiber-rich foods.
+   - Limit sugary drinks and processed snacks.
+   
+3. Regular Checkups
+   - Monitor glucose levels and blood pressure periodically.
+   - Maintain a healthy weight.
+            """
+            
+        textbox.insert("0.0", title + content)
+        textbox.configure(state="disabled")
 
-import pandas as pd
-DF = pd.DataFrame()
-def action():
-    global DB
-    import pandas as pd
-    DF = pd.DataFrame(columns=['Preg','Gluco','BP','skinTH','Insulin','BMI','Pedigreefunc','Age'])
-    PREG=Preg_var.get()
-    DF.loc[0,'Preg']=PREG
-    PLAS=Gluco_var.get()
-    DF.loc[0,'Gluco']=PLAS
-    PRES=BP_var.get()
-    DF.loc[0,'BP']=PRES
-    SKIN=skinTH_var.get()
-    DF.loc[0,'skinTH']=SKIN
-    TEST=Insulin_var.get()
-    DF.loc[0,'Insulin']=TEST
-    MASS=BMI_var.get()
-    DF.loc[0,'BMI']=MASS
-    PEDI=Pedigreefunc_var.get()
-    DF.loc[0,'Pedigreefunc']=PEDI
-    AGE=Age_var.get()
-    DF.loc[0,'Age']=AGE
-    print(DF.shape)
-    DB=DF
-
-Submit_button=ttk.Button(win,text="Submit",command=action)
-Submit_button.grid(row=30,column=1)
-
-
-def diet():
-   top= tk.Toplevel(win)
-   top.geometry("750x250")
-   top.title("Diet")
-   tk.Label(top, text= "* Carbohydrates - 50%",font=('18')).place(x=150,y=80)
-   tk.Label(top, text= "* Proteins      - 25%",font=('18')).place(x=150,y=120)
-   tk.Label(top, text= "* Fats          - 25%",font=('18')).place(x=150,y=160)
-   tk.Label(top, text= "                     ",font=('18')).place(x=150,y=200)
-   tk.Label(top, text= "* Carbohydrates - Starch,Bread,Milk,Yogurt,Vegetables,fruits",font=('18')).place(x=150,y=240)
-   tk.Label(top, text= "* Proteins      - Eggs,Cheese,fish,poultry",font=('18')).place(x=150,y=280)
-   tk.Label(top, text= "* Fats          - Oils,Nuts,Animal fats,Shellfish",font=('18')).place(x=150,y=320)
-
-def precaution():
-   top= tk.Toplevel(win)
-   top.geometry("750x250")
-   top.title("Tips to control")
-   tk.Label(top, text= "* Be more physically active", font=('18')).place(x=150,y=80)
-   tk.Label(top, text= "* Eat healthy plant foods. Plants provide vitamins, minerals and carbohydrates", font=('18')).place(x=150,y=120)
-   tk.Label(top, text= "* Eat healthy fats.", font=('18')).place(x=150,y=160)
-
-def Output():
-    DB["Preg"] = pd.to_numeric(DB["Preg"])
-    DB["Gluco"] = pd.to_numeric(DB["Gluco"])
-    DB["BP"] = pd.to_numeric(DB["BP"])
-    DB["skinTH"] = pd.to_numeric(DB["skinTH"])
-    DB["Insulin"] = pd.to_numeric(DB["Insulin"])
-    DB["BMI"] = pd.to_numeric(DB["BMI"])
-    DB["Pedigreefunc"] = pd.to_numeric(DB["Pedigreefunc"])
-    DB["Age"] = pd.to_numeric(DB["Age"])
-
-    output=model.predict(DB)
-    if output==1:
-        result='Diabetic'
-        res=1
-    elif output==0:
-        result='Non-Diabetic'
-        res=0
-    Predict_entrybox=ttk.Entry(win,width=16)
-    Predict_entrybox.grid(row=20,column=1)
-    Predict_entrybox.insert(1,str(result))
-    if output==1:
-        lab = ttk.Entry(win,width=25)
-        lab.grid(row=50,column=0)
-        lab.insert(1,str("Check your diet here!"))
-        Click_button=ttk.Button(win,text="Click here",command=diet)
-        Click_button.grid(row=50,column=1)
-    elif output==0:
-        lab = ttk.Entry(win,width=25)
-        lab.grid(row=50,column=0)
-        lab.insert(1,str("Click here for Tips!"))
-        Click_button=ttk.Button(win,text="Click here",command=precaution)
-        Click_button.grid(row=50,column=1)
-
-Predict_button=ttk.Button(win,text="Predict",command=Output,)
-Predict_button.grid(row=32,column=1)
-win.mainloop()
+if __name__ == "__main__":
+    app = DiabetesApp()
+    app.mainloop()
